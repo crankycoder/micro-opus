@@ -16,8 +16,8 @@
  * Implements RFC 7845 OpusHead and OpusTags parsing
  */
 
-#ifndef OPUS_HEADER_HPP
-#define OPUS_HEADER_HPP
+#ifndef OPUS_HEADER_H
+#define OPUS_HEADER_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -61,7 +61,7 @@ enum OpusHeaderResult {
  * @param head Output OpusHead structure
  * @return OpusHeaderResult result code
  */
-OpusHeaderResult parseOpusHead(const uint8_t* packet, size_t packet_len, OpusHead& head);
+OpusHeaderResult parse_opus_head(const uint8_t* packet, size_t packet_len, OpusHead& head);
 
 /**
  * @brief Check if packet is OpusHead
@@ -70,7 +70,7 @@ OpusHeaderResult parseOpusHead(const uint8_t* packet, size_t packet_len, OpusHea
  * @param packet_len Packet length
  * @return true if packet starts with "OpusHead"
  */
-bool isOpusHead(const uint8_t* packet, size_t packet_len);
+bool is_opus_head(const uint8_t* packet, size_t packet_len);
 
 /**
  * @brief Check if packet is OpusTags
@@ -79,8 +79,8 @@ bool isOpusHead(const uint8_t* packet, size_t packet_len);
  * @param packet_len Packet length
  * @return true if packet starts with "OpusTags"
  */
-bool isOpusTags(const uint8_t* packet, size_t packet_len);
+bool is_opus_tags(const uint8_t* packet, size_t packet_len);
 
 }  // namespace micro_opus
 
-#endif  // OPUS_HEADER_HPP
+#endif  // OPUS_HEADER_H

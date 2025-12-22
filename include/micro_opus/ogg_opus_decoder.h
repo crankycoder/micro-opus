@@ -17,8 +17,8 @@
  * and streaming decoding of Opus audio.
  */
 
-#ifndef OGG_OPUS_DECODER_HPP
-#define OGG_OPUS_DECODER_HPP
+#ifndef OGG_OPUS_DECODER_H
+#define OGG_OPUS_DECODER_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -70,11 +70,7 @@ enum OggOpusResult : int8_t {
     OGG_OPUS_OUTPUT_BUFFER_TOO_SMALL = -5,  ///< Output buffer too small for decoded samples
 
     // Opus decode errors (issues from the Opus decoder itself)
-    OGG_OPUS_DECODE_ERROR = -6,             ///< Generic Opus decode error
-    OGG_OPUS_DECODE_INVALID_PACKET = -7,    ///< Opus decoder: invalid/corrupted packet
-    OGG_OPUS_DECODE_BUFFER_TOO_SMALL = -8,  ///< Opus decoder: internal buffer too small
-    OGG_OPUS_DECODE_INTERNAL_ERROR = -9,    ///< Opus decoder: internal error
-    OGG_OPUS_DECODE_BAD_ARG = -10           ///< Opus decoder: invalid argument to Opus decoder
+    OGG_OPUS_DECODE_ERROR = -6  ///< Opus decode failed (corrupted/invalid packet)
 };
 
 /**
@@ -122,7 +118,7 @@ enum OggOpusResult : int8_t {
  *     size_t consumed, samples;
  *     OggOpusResult result = decoder.decode(
  *         input_ptr, input_len,
- *         pcm_buffer, sizeof(pcm_buffer) / sizeof(int16_t),
+ *         pcm_buffer, sizeof(pcm_buffer),
  *         consumed, samples
  *     );
  *
@@ -152,20 +148,26 @@ public:
      * The constructor always succeeds and does not allocate any resources.
      * All allocations are deferred to the first call to decode().
      *
-     * @param enable_crc Enable CRC32 validation of Ogg pages (default true)
+     * @param enable_crc Enable CRC32 validation of Ogg pages (default false)
+     * @param sample_rate Output sample rate in Hz. Must be one of: 8000, 12000,
+     *                    16000, 24000, 48000. Default is 48000 (native Opus rate).
+     *                    Lower rates reduce CPU usage but lose high-frequency content.
+     * @param channels Output channel count. 0 = use file's channel count (default).
+     *                 1 = mono, 2 = stereo. The Opus decoder handles mixing/duplication.
      *
      * @note This constructor is guaranteed not to fail. Resource allocation
      *       is deferred to the first decode() call, which can return
      *       OGG_OPUS_ALLOCATION_FAILED if memory allocation fails.
      *
-     * @note CRC Validation: When enabled (default), all Ogg pages are validated
+     * @note CRC Validation: When enabled, all Ogg pages are validated
      *       using CRC32 checksums as recommended by RFC 3533. Disabling CRC
      *       validation can provide a performance improvement but sacrifices
      *       data integrity checking. Only disable CRC for trusted sources (local
      *       files) or when performance is critical and corruption detection is
      *       not required.
      */
-    OggOpusDecoder(bool enable_crc = false);
+    OggOpusDecoder(bool enable_crc = false, uint32_t sample_rate = OPUS_DEFAULT_SAMPLE_RATE,
+                   uint8_t channels = 0);
 
     /**
      * @brief Destroy the decoder and free resources
@@ -181,7 +183,7 @@ public:
      * @param input Pointer to input Ogg Opus data (must not be nullptr)
      * @param input_len Number of bytes available in input
      * @param output Pointer to output buffer for PCM samples (must not be nullptr)
-     * @param output_capacity Number of int16_t samples output buffer can hold
+     * @param output_size Number of bytes available in output buffer
      * @param bytes_consumed [OUT] Number of input bytes consumed (may be buffered internally)
      * @param samples_decoded [OUT] Number of PCM samples decoded (per channel)
      *
@@ -204,13 +206,13 @@ public:
      *
      * @note The user must advance the input pointer by bytes_consumed before
      *       calling decode() again.
-     * @note output_capacity is in samples (not bytes). For stereo, you need
-     *       output_capacity >= samples_per_frame * 2.
+     * @note output_size is in bytes. For stereo 16-bit audio, you need
+     *       output_size >= samples_per_frame * 2 channels * 2 bytes.
      * @note Can handle arbitrarily small input chunks (even 1 byte at a time)
      *       thanks to internal header staging buffer.
      */
     OggOpusResult decode(const uint8_t* input, size_t input_len, int16_t* output,
-                         size_t output_capacity, size_t& bytes_consumed, size_t& samples_decoded);
+                         size_t output_size, size_t& bytes_consumed, size_t& samples_decoded);
 
     /**
      * @brief Get the sample rate of the decoded audio
@@ -221,7 +223,7 @@ public:
      * @note This is the decoder's sample rate, not the original input
      *       sample rate (which is stored in OpusHead for informational purposes)
      */
-    uint32_t getSampleRate() const;
+    uint32_t get_sample_rate() const;
 
     /**
      * @brief Get the number of channels
@@ -229,7 +231,21 @@ public:
      * @return Number of channels (1 for mono, 2 for stereo, etc.)
      *         Returns 0 if header not yet parsed
      */
-    uint8_t getChannels() const;
+    uint8_t get_channels() const;
+
+    /**
+     * @brief Get the bit depth of decoded samples
+     *
+     * @return Bit depth (always 16 for int16_t output samples)
+     */
+    uint8_t get_bit_depth() const;
+
+    /**
+     * @brief Get the number of bytes per sample
+     *
+     * @return Bytes per sample (always 2 for int16_t output samples)
+     */
+    uint8_t get_bytes_per_sample() const;
 
     /**
      * @brief Get the pre-skip value
@@ -239,7 +255,7 @@ public:
      *
      * @return Pre-skip samples at 48kHz, or 0 if header not yet parsed
      */
-    uint16_t getPreSkip() const;
+    uint16_t get_pre_skip() const;
 
     /**
      * @brief Get the output gain
@@ -248,14 +264,35 @@ public:
      *
      * @return Output gain, or 0 if header not yet parsed
      */
-    int16_t getOutputGain() const;
+    int16_t get_output_gain() const;
+
+    /**
+     * @brief Get the required output buffer size for the last packet
+     *
+     * This method returns the buffer size (in bytes) needed to decode
+     * the most recently processed audio packet. It is particularly useful
+     * after receiving OGG_OPUS_OUTPUT_BUFFER_TOO_SMALL to determine the
+     * correct buffer size to allocate.
+     *
+     * The returned value accounts for:
+     * - Number of samples in the packet (based on frame size and frame count)
+     * - Number of output channels
+     * - Sample size (sizeof(int16_t) = 2 bytes)
+     *
+     * @return Required buffer size in bytes, or 0 if no audio packet has been
+     *         processed yet (i.e., still parsing headers)
+     *
+     * @note This value is updated each time an audio packet is processed,
+     *       regardless of whether decoding succeeded or failed.
+     */
+    size_t get_required_output_buffer_size() const;
 
     /**
      * @brief Check if the OpusHead header has been parsed
      *
      * @return true if header is parsed and decoder is initialized
      */
-    bool isInitialized() const;
+    bool is_initialized() const;
 
     /**
      * @brief Reset the decoder state
@@ -275,8 +312,9 @@ public:
     /**
      * @brief Get debug state from demuxer (for debugging only)
      */
-    void getDemuxerDebugState(int& state, bool& assembling, bool& skipping, size_t& packet_size,
-                              size_t& body_consumed, uint8_t& seg_index, uint8_t& seg_count) const;
+    void get_demuxer_debug_state(int& state, bool& assembling, bool& skipping, size_t& packet_size,
+                                 size_t& body_consumed, uint8_t& seg_index,
+                                 uint8_t& seg_count) const;
 
     /**
      * @brief Get zero-copy statistics from the internal OggDemuxer
@@ -286,7 +324,7 @@ public:
      *
      * @note These statistics track all packets demuxed, including headers (OpusHead/OpusTags)
      */
-    void getDemuxerStats(size_t& zero_copy_count, size_t& buffered_count) const;
+    void get_demuxer_stats(size_t& zero_copy_count, size_t& buffered_count) const;
 
     /**
      * @brief Get buffer statistics from the internal OggDemuxer
@@ -294,7 +332,7 @@ public:
      * @param current_capacity Output: current internal buffer capacity in bytes
      * @param max_capacity Output: maximum internal buffer capacity reached in bytes
      */
-    void getBufferStats(size_t& current_capacity, size_t& max_capacity) const;
+    void get_buffer_stats(size_t& current_capacity, size_t& max_capacity) const;
 #endif  // MICRO_OGG_DEMUXER_DEBUG
 
 private:
@@ -303,8 +341,31 @@ private:
     OggOpusDecoder& operator=(const OggOpusDecoder&) = delete;
 
     // Internal packet processing
-    OggOpusResult processPacket(const micro_ogg::OggPacket& packet, int16_t* output,
-                                size_t output_capacity, size_t& samples_decoded);
+    OggOpusResult process_packet(const micro_ogg::OggPacket& packet, int16_t* output,
+                                 size_t output_size, size_t& samples_decoded);
+
+    // Page boundary tracking helper
+    void update_page_tracking(bool is_last_on_page);
+
+    // Granule position validation helper (RFC 7845 compliance)
+    OggOpusResult validate_granule_position(int64_t granule_pos, size_t decoded_samples,
+                                            bool is_eos, bool is_last_on_page);
+
+    // Pre-skip handling helper
+    OggOpusResult apply_pre_skip(int16_t* output, size_t decoded_samples, uint8_t output_channels,
+                                 size_t& samples_decoded);
+
+    // Opus decoder creation helper
+    OggOpusResult create_opus_decoder(uint8_t output_channels);
+
+    // State handlers
+    OggOpusResult handle_opus_head_packet(const uint8_t* packet_data, size_t packet_len,
+                                          int64_t granule_pos, bool is_bos, bool is_last_on_page);
+    OggOpusResult handle_opus_tags_packet(const uint8_t* packet_data, size_t packet_len,
+                                          int64_t granule_pos, bool is_last_on_page);
+    OggOpusResult handle_audio_packet(const uint8_t* packet_data, size_t packet_len,
+                                      int64_t granule_pos, bool is_eos, bool is_last_on_page,
+                                      int16_t* output, size_t output_size, size_t& samples_decoded);
 
     // Internal state machine
     enum State : uint8_t { STATE_EXPECT_OPUS_HEAD, STATE_EXPECT_OPUS_TAGS, STATE_DECODING };
@@ -339,6 +400,9 @@ private:
     // RFC 7845 Section 4: Total size across all continuation pages
     size_t opus_tags_accumulated_size_{0};
 
+    // Required output buffer size for the last audio packet (in bytes)
+    size_t last_required_buffer_bytes_{0};
+
     // RFC 7845 Section 4: First audio data page granule position validation
     // Tracks total samples that complete on the first audio data page
     // -1 = not yet on first audio page, 0+ = accumulating samples, validated after first page
@@ -356,6 +420,12 @@ private:
 
     // Ogg demuxer configuration
     bool enable_crc_;  // CRC validation setting (passed to OggDemuxer)
+
+    // Output channel count (0 = use file's channel count)
+    uint8_t channels_{0};
+
+    // Resolved output channel count (set after OpusHead parsing)
+    uint8_t output_channels_{0};
 
     // Pre-skip tracking
     bool pre_skip_applied_{false};
@@ -382,4 +452,4 @@ private:
 
 }  // namespace micro_opus
 
-#endif  // OGG_OPUS_DECODER_HPP
+#endif  // OGG_OPUS_DECODER_H

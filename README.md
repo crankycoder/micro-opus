@@ -152,7 +152,7 @@ while (have_input_data) {
 
     micro_opus::OggOpusResult result = decoder.decode(
         input_ptr, input_len,
-        pcm_buffer, sizeof(pcm_buffer) / sizeof(int16_t),
+        pcm_buffer, sizeof(pcm_buffer),
         bytes_consumed, samples_decoded
     );
 
@@ -167,8 +167,8 @@ while (have_input_data) {
 }
 
 // Get stream info
-uint32_t sample_rate = decoder.getSampleRate();
-uint8_t channels = decoder.getChannels();
+uint32_t sample_rate = decoder.get_sample_rate();
+uint8_t channels = decoder.get_channels();
 ```
 
 See the [decode benchmark example](examples/decode_benchmark) for a complete working example.

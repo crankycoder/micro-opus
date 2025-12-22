@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
 
                 micro_opus::OggOpusResult result =
                     decoder.decode(input_buffer.data(), offset, pcm_buffer.data(),
-                                   pcm_buffer.size(), consumed, samples);
+                                   pcm_buffer.size() * sizeof(int16_t), consumed, samples);
 
                 if (result < 0 && consumed == 0) {
                     // Real error (not just need-more-data)
@@ -87,10 +87,10 @@ int main(int argc, char* argv[]) {
 
         // Get statistics
         size_t zero_copy = 0, buffered = 0;
-        decoder.getDemuxerStats(zero_copy, buffered);
+        decoder.get_demuxer_stats(zero_copy, buffered);
 
         size_t current_buffer_size = 0, max_buffer_size = 0;
-        decoder.getBufferStats(current_buffer_size, max_buffer_size);
+        decoder.get_buffer_stats(current_buffer_size, max_buffer_size);
 
         size_t total_packets = zero_copy + buffered;
 
