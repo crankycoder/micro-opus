@@ -60,6 +60,14 @@ function(opus_configure_esp_idf COMPONENT_LIB COMPONENT_DIR OPUS_STAGED_DIR)
     # Set optimization flags
     opus_set_optimization_flags(${COMPONENT_LIB})
 
+    # Suppress false positive warnings in upstream opus code
+    # These are GCC analyzer bugs, not actual code issues
+    set_source_files_properties(
+        "${OPUS_STAGED_DIR}/silk/decode_indices.c"
+        "${OPUS_STAGED_DIR}/silk/NLSF2A.c"
+        PROPERTIES COMPILE_FLAGS "-Wno-stringop-overflow -Wno-maybe-uninitialized"
+    )
+
     # Configure Xtensa optimizations (controlled via Kconfig)
     if(CONFIG_OPUS_ENABLE_XTENSA_OPTIMIZATIONS)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE OPUS_XTENSA_LX7)
